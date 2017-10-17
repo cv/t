@@ -204,7 +204,7 @@ var IATA = map[string]string{
 	"AJN": "Indian/Comoro",
 	"AJR": "Europe/Stockholm",
 	"AJS": "America/Hermosillo",
-	"AJU": "America/Noronha",
+	"AJU": "America/Maceio",
 	"AJY": "Africa/Niamey",
 	"AKA": "Asia/Chongqing",
 	"AKB": "America/Adak",
