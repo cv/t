@@ -5,7 +5,7 @@ Quick and dirty world clock for the command-line.
 Install with:
 
 ```bash
-go install github.com/cv/t/cmd/t
+go get github.com/cv/t/cmd/t
 ```
 
 And then:
