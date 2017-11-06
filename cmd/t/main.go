@@ -11,6 +11,7 @@ import (
 )
 
 const layout = "15:04:05"
+const layoutShort = "15:04"
 
 var clocksLow = []string{
 	"🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚",
@@ -28,8 +29,11 @@ func main() {
 		os.Exit(-1)
 	}
 
-	for _, i := range os.Args[1:] {
-		show(i)
+	for i, s := range os.Args[1:] {
+		show(s)
+		if os.Getenv("PS1_FORMAT") != "" && i < len(os.Args[1:])-1 {
+			fmt.Print(" ")
+		}
 	}
 }
 
@@ -51,5 +55,9 @@ func show(iata string) {
 		emoji = clocksLow[now.Hour()]
 	}
 
-	fmt.Printf("%s: %s  %s (%s)\n", iata, emoji, now.Format(layout), locName)
+	if os.Getenv("PS1_FORMAT") != "" {
+		fmt.Printf("%s %s", iata, now.Format(layoutShort))
+	} else {
+		fmt.Printf("%s: %s  %s (%s)\n", iata, emoji, now.Format(layout), locName)
+	}
 }
