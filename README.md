@@ -5,7 +5,7 @@ Quick and dirty world clock for the command-line.
 Install with:
 
 ```bash
-go get github.com/cv/t/cmd/t
+go install github.com/cv/t@master
 ```
 
 And then:
@@ -17,6 +17,13 @@ JFK: 🕖  19:06:21 (America/New_York)
 ```
 
 Any IATA airport code can be used, and will pick the timezone of that airport.
+
+If `PS1_FORMAT` is set, the output will be simply the airport code and the time, with no decorations or newline:
+
+```bash
+$ echo $(PS1_FORMAT=1 t sfo lon)
+SFO 17:47 LON 01:47
+```
 
 That's it!
 
