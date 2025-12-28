@@ -1,0 +1,45 @@
+#!/bin/bash
+# Pre-commit hook: runs the same checks as CI
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+# Build
+echo -n "📦 Building... "
+if make build 2>&1 > /dev/null; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}✗${NC}"
+    echo "Build failed. Fix errors before committing."
+    exit 1
+fi
+
+# Test (without race detector for speed)
+echo -n "🧪 Testing... "
+if make test 2>&1 > /dev/null; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}✗${NC}"
+    echo "Tests failed. Fix errors before committing."
+    make test
+    exit 1
+fi
+
+# Lint
+echo -n "🔬 Linting... "
+if make lint 2>&1 > /dev/null; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}✗${NC}"
+    echo "Linting failed. Fix errors before committing."
+    make lint
+    exit 1
+fi
+
+echo -e "${GREEN}✅ All checks passed!${NC}"
