@@ -5,6 +5,7 @@
 //	t <IATA>...
 //	t <IATA>@<time> <IATA>...
 //	t -d | --date <IATA>...
+//	t --overlap [--hours=H-H] <IATA> <IATA>...
 //	t -v | --version
 //
 // Examples:
@@ -20,14 +21,31 @@
 //	$ t sfo@9:00 jfk lon
 //	SFO: 🕘 09:00  →  JFK: 🕛 12:00, LON: 🕔 17:00
 //
+//	$ t --overlap sfo lon nrt
+//	Working hours overlap (9:00-17:00 local):
+//	  No overlapping hours found
+//
+//	$ t --overlap --hours=8-18 sfo jfk
+//	Working hours overlap (8:00-18:00 local):
+//	  09:00-15:00 SFO = 12:00-18:00 JFK
+//	  (6 hours overlap)
+//
 // Time Conversion:
 //
 //	Use IATA@HH:MM to specify a time at a location and see the equivalent
 //	time in other timezones. Useful for scheduling meetings across timezones.
 //
+// Meeting Overlap:
+//
+//	Use --overlap to find overlapping work hours across timezones.
+//	Default work hours are 9:00-17:00 local time. Use --hours=H-H or
+//	--hours=HH:MM-HH:MM to customize (e.g., --hours=8:00-18:00).
+//
 // Flags:
 //
 //	-d, --date  Show date alongside time (auto-enabled when dates differ)
+//	--overlap   Find overlapping work hours across timezones
+//	--hours=H-H Custom work hours for overlap calculation (default: 9-17)
 //	-v, --version  Show version information
 //
 // Environment:
@@ -51,7 +69,7 @@ var (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, "usage: t [-d|--date] <IATA>...\n")
+		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--overlap [--hours=H-H]] <IATA>...\n")
 		os.Exit(1)
 	}
 
@@ -64,15 +82,45 @@ func main() {
 	// Parse flags
 	args := os.Args[1:]
 	showDate := false
+	overlapMode := false
+	workHours := clock.DefaultWorkHours
 
-	if len(args) > 0 && (args[0] == "-d" || args[0] == "--date") {
-		showDate = true
-		args = args[1:]
+	for len(args) > 0 {
+		switch {
+		case args[0] == "-d" || args[0] == "--date":
+			showDate = true
+			args = args[1:]
+		case args[0] == "--overlap":
+			overlapMode = true
+			args = args[1:]
+		case len(args[0]) > 8 && args[0][:8] == "--hours=":
+			hoursStr := args[0][8:]
+			if parsed := clock.ParseWorkHours(hoursStr); parsed != nil {
+				workHours = *parsed
+			} else {
+				fmt.Fprintf(os.Stderr, "invalid work hours format: %s (use H-H or HH:MM-HH:MM)\n", hoursStr)
+				os.Exit(1)
+			}
+			args = args[1:]
+		default:
+			goto done
+		}
 	}
+done:
 
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "usage: t [-d|--date] <IATA>...\n")
+		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--overlap [--hours=H-H]] <IATA>...\n")
 		os.Exit(1)
+	}
+
+	// Handle overlap mode
+	if overlapMode {
+		if len(args) < 2 {
+			fmt.Fprint(os.Stderr, "usage: t --overlap [--hours=H-H] <IATA> <IATA>...\n")
+			os.Exit(1)
+		}
+		clock.ShowOverlap(os.Stdout, args, workHours, nil)
+		return
 	}
 
 	ps1Format := os.Getenv("PS1_FORMAT") != ""
