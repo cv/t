@@ -1,7 +1,11 @@
-.PHONY: all build test test-cover test-race lint clean install
+.PHONY: all build test test-cover test-race lint clean install generate
 
 # Default target
 all: lint test build
+
+# Generate code (downloads fresh IATA data)
+generate:
+	go generate ./...
 
 # Build the binary
 build:
