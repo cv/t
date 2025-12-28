@@ -45,6 +45,85 @@ func TestClockEmoji(t *testing.T) {
 	}
 }
 
+func TestRelativeOffset(t *testing.T) {
+	// Load fixed locations for deterministic tests
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+	london, err := time.LoadLocation("Europe/London")
+	require.NoError(t, err)
+	newYork, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	kolkata, err := time.LoadLocation("Asia/Kolkata") // UTC+5:30
+	require.NoError(t, err)
+
+	// Use a fixed base time in winter (no DST complications)
+	baseTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name       string
+		targetLoc  *time.Location
+		localLoc   *time.Location
+		wantOffset string
+	}{
+		{
+			name:       "same timezone",
+			targetLoc:  tokyo,
+			localLoc:   tokyo,
+			wantOffset: "(+0h)",
+		},
+		{
+			name:       "Tokyo from London (winter)",
+			targetLoc:  tokyo,
+			localLoc:   london,
+			wantOffset: "(+9h)", // Tokyo is UTC+9, London is UTC+0 in winter
+		},
+		{
+			name:       "London from Tokyo (winter)",
+			targetLoc:  london,
+			localLoc:   tokyo,
+			wantOffset: "(-9h)", // London is 9 hours behind Tokyo
+		},
+		{
+			name:       "Tokyo from New York (winter)",
+			targetLoc:  tokyo,
+			localLoc:   newYork,
+			wantOffset: "(+14h)", // Tokyo is UTC+9, NY is UTC-5 in winter
+		},
+		{
+			name:       "New York from Tokyo (winter)",
+			targetLoc:  newYork,
+			localLoc:   tokyo,
+			wantOffset: "(-14h)",
+		},
+		{
+			name:       "Kolkata from London (half hour offset)",
+			targetLoc:  kolkata,
+			localLoc:   london,
+			wantOffset: "(+5h30m)", // Kolkata is UTC+5:30
+		},
+		{
+			name:       "London from Kolkata (negative half hour)",
+			targetLoc:  london,
+			localLoc:   kolkata,
+			wantOffset: "(-5h30m)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Temporarily override time.Local for the test
+			origLocal := time.Local
+			time.Local = tt.localLoc
+			defer func() { time.Local = origLocal }()
+
+			targetTime := baseTime.In(tt.targetLoc)
+			got := RelativeOffset(targetTime)
+
+			assert.Equal(t, tt.wantOffset, got, "offset mismatch")
+		})
+	}
+}
+
 func TestLookupTime(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 
@@ -219,6 +298,53 @@ func TestFormatResultContainsEmoji(t *testing.T) {
 		}
 	}
 	assert.True(t, hasEmoji, "output should contain a clock emoji")
+}
+
+func TestFormatResultContainsOffset(t *testing.T) {
+	// Set a fixed local timezone for deterministic testing
+	london, err := time.LoadLocation("Europe/London")
+	require.NoError(t, err)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	require.NoError(t, err)
+
+	// Use winter time to avoid DST complications
+	baseTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+	tokyoTime := baseTime.In(tokyo)
+
+	// Override time.Local to London for deterministic test
+	origLocal := time.Local
+	time.Local = london
+	defer func() { time.Local = origLocal }()
+
+	result := TimeResult{
+		IATA:     "NRT",
+		Time:     tokyoTime,
+		Location: "Asia/Tokyo",
+		Found:    true,
+	}
+
+	got := FormatResult(result, false, false)
+
+	// Tokyo is UTC+9, London is UTC+0 in winter, so offset should be +9h
+	assert.Contains(t, got, "(+9h)", "output should contain relative offset")
+	assert.Contains(t, got, "NRT:", "output should contain IATA code")
+	assert.Contains(t, got, "Asia/Tokyo", "output should contain location")
+}
+
+func TestFormatResultPS1NoOffset(t *testing.T) {
+	// PS1 format should NOT include offset (keep it compact)
+	fixedTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
+	result := TimeResult{
+		IATA:     "SFO",
+		Time:     fixedTime,
+		Location: "America/Los_Angeles",
+		Found:    true,
+	}
+
+	got := FormatResult(result, true, false)
+
+	assert.NotContains(t, got, "(+", "ps1 format should not contain offset")
+	assert.NotContains(t, got, "(-", "ps1 format should not contain offset")
 }
 
 func TestShow(t *testing.T) {

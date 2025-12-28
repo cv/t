@@ -37,6 +37,44 @@ type TimeResult struct {
 	Found    bool
 }
 
+// RelativeOffset calculates the offset of t's timezone from the local timezone.
+// Returns a string like "(+8h)", "(-5h)", "(+5h30m)", or "(+0h)" if same timezone.
+func RelativeOffset(t time.Time) string {
+	localLoc := time.Local
+	localTime := t.In(localLoc)
+
+	// Get the offset in seconds for both timezones at this instant
+	_, targetOffset := t.Zone()
+	_, localOffset := localTime.Zone()
+
+	// Calculate the difference in seconds
+	diffSeconds := targetOffset - localOffset
+
+	// Convert to hours and minutes
+	diffMinutes := diffSeconds / 60
+	hours := diffMinutes / 60
+	minutes := diffMinutes % 60
+
+	// Handle negative minutes (e.g., -5h30m should be -5h -30m -> -5h30m)
+	if minutes < 0 {
+		minutes = -minutes
+	}
+
+	// Format the offset string
+	sign := "+"
+	if hours < 0 || (hours == 0 && diffSeconds < 0) {
+		sign = "-"
+		if hours < 0 {
+			hours = -hours
+		}
+	}
+
+	if minutes == 0 {
+		return fmt.Sprintf("(%s%dh)", sign, hours)
+	}
+	return fmt.Sprintf("(%s%dh%dm)", sign, hours, minutes)
+}
+
 // ClockEmoji returns the appropriate clock emoji for the given time.
 // It uses half-hour emojis when minutes > 30.
 func ClockEmoji(t time.Time) string {
@@ -96,10 +134,11 @@ func FormatResult(r TimeResult, ps1Format, showDate bool) string {
 	}
 
 	emoji := ClockEmoji(r.Time)
+	offset := RelativeOffset(r.Time)
 	if showDate {
-		return fmt.Sprintf("%s: %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), r.Location)
+		return fmt.Sprintf("%s: %s %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), offset, r.Location)
 	}
-	return fmt.Sprintf("%s: %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Location)
+	return fmt.Sprintf("%s: %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), offset, r.Location)
 }
 
 // Show writes the time for a given IATA code to the provided writer.
