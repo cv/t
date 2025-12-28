@@ -4,8 +4,12 @@
 //
 //	t <IATA>...
 //	t <IATA>@<time> <IATA>...
+//	t @alias
 //	t -d | --date <IATA>...
 //	t --overlap [--hours=H-H] <IATA> <IATA>...
+//	t --save <name> <IATA>...
+//	t --list
+//	t --delete <name>
 //	t -v | --version
 //
 // Examples:
@@ -30,6 +34,20 @@
 //	  09:00-15:00 SFO = 12:00-18:00 JFK
 //	  (6 hours overlap)
 //
+//	$ t --save team sfo jfk lon
+//	Saved alias 'team'
+//
+//	$ t @team
+//	SFO: 🕓 16:06:21 (America/Los_Angeles)
+//	JFK: 🕖 19:06:21 (America/New_York)
+//	LON: 🕛 00:06:21 (Europe/London)
+//
+//	$ t --list
+//	team: SFO JFK LON
+//
+//	$ t --delete team
+//	Deleted alias 'team'
+//
 // Time Conversion:
 //
 //	Use IATA@HH:MM to specify a time at a location and see the equivalent
@@ -41,11 +59,19 @@
 //	Default work hours are 9:00-17:00 local time. Use --hours=H-H or
 //	--hours=HH:MM-HH:MM to customize (e.g., --hours=8:00-18:00).
 //
+// Aliases:
+//
+//	Save frequently used city groups with --save and recall them with @alias.
+//	Aliases are stored in ~/.config/t/aliases.json.
+//
 // Flags:
 //
-//	-d, --date  Show date alongside time (auto-enabled when dates differ)
-//	--overlap   Find overlapping work hours across timezones
-//	--hours=H-H Custom work hours for overlap calculation (default: 9-17)
+//	-d, --date     Show date alongside time (auto-enabled when dates differ)
+//	--overlap      Find overlapping work hours across timezones
+//	--hours=H-H    Custom work hours for overlap calculation (default: 9-17)
+//	--save <name>  Save following IATA codes as named alias
+//	--list         List all saved aliases
+//	--delete <name> Delete a saved alias
 //	-v, --version  Show version information
 //
 // Environment:
@@ -56,8 +82,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/cv/t/internal/clock"
+	"github.com/cv/t/internal/config"
 )
 
 // Version information set by goreleaser ldflags
@@ -68,19 +96,43 @@ var (
 )
 
 func main() {
-	if len(os.Args) < 2 {
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	if len(args) < 1 {
 		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--overlap [--hours=H-H]] <IATA>...\n")
-		os.Exit(1)
+		fmt.Fprint(os.Stderr, "       t --save <name> <IATA>...\n")
+		fmt.Fprint(os.Stderr, "       t --list | --delete <name>\n")
+		return 1
 	}
 
 	// Handle version flag
-	if os.Args[1] == "-v" || os.Args[1] == "--version" {
+	if args[0] == "-v" || args[0] == "--version" {
 		fmt.Printf("t %s (commit: %s, built: %s)\n", version, commit, date)
-		return
+		return 0
+	}
+
+	// Handle alias management flags
+	if args[0] == "--list" {
+		return handleList()
+	}
+	if args[0] == "--delete" {
+		if len(args) < 2 {
+			fmt.Fprint(os.Stderr, "usage: t --delete <name>\n")
+			return 1
+		}
+		return handleDelete(args[1])
+	}
+	if args[0] == "--save" {
+		if len(args) < 3 {
+			fmt.Fprint(os.Stderr, "usage: t --save <name> <IATA>...\n")
+			return 1
+		}
+		return handleSave(args[1], args[2:])
 	}
 
 	// Parse flags
-	args := os.Args[1:]
 	showDate := false
 	overlapMode := false
 	workHours := clock.DefaultWorkHours
@@ -99,7 +151,7 @@ func main() {
 				workHours = *parsed
 			} else {
 				fmt.Fprintf(os.Stderr, "invalid work hours format: %s (use H-H or HH:MM-HH:MM)\n", hoursStr)
-				os.Exit(1)
+				return 1
 			}
 			args = args[1:]
 		default:
@@ -110,17 +162,25 @@ done:
 
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--overlap [--hours=H-H]] <IATA>...\n")
-		os.Exit(1)
+		return 1
 	}
+
+	// Expand any @alias references in args
+	expandedArgs, err := expandAliases(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	args = expandedArgs
 
 	// Handle overlap mode
 	if overlapMode {
 		if len(args) < 2 {
 			fmt.Fprint(os.Stderr, "usage: t --overlap [--hours=H-H] <IATA> <IATA>...\n")
-			os.Exit(1)
+			return 1
 		}
 		clock.ShowOverlap(os.Stdout, args, workHours, nil)
-		return
+		return 0
 	}
 
 	ps1Format := os.Getenv("PS1_FORMAT") != ""
@@ -129,11 +189,99 @@ done:
 	if spec := clock.ParseTimeSpec(args[0]); spec != nil {
 		if len(args) < 2 {
 			fmt.Fprint(os.Stderr, "usage: t <IATA>@<time> <IATA>...\n")
-			os.Exit(1)
+			return 1
 		}
 		clock.ShowConversion(os.Stdout, *spec, args[1:], ps1Format, nil)
-		return
+		return 0
 	}
 
 	clock.ShowAll(os.Stdout, args, ps1Format, showDate, nil)
+	return 0
+}
+
+// handleSave saves an alias with the given name and IATA codes.
+func handleSave(name string, codes []string) int {
+	store, err := config.NewAliasStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	if err := store.Save(name, codes); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("Saved alias '%s'\n", name)
+	return 0
+}
+
+// handleList lists all saved aliases.
+func handleList() int {
+	store, err := config.NewAliasStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	names := store.ListSorted()
+	if len(names) == 0 {
+		fmt.Println("No aliases saved")
+		return 0
+	}
+
+	aliases := store.List()
+	for _, name := range names {
+		codes := aliases[name]
+		fmt.Printf("%s: %s\n", name, strings.Join(codes, " "))
+	}
+	return 0
+}
+
+// handleDelete deletes an alias by name.
+func handleDelete(name string) int {
+	store, err := config.NewAliasStore()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	if err := store.Delete(name); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("Deleted alias '%s'\n", name)
+	return 0
+}
+
+// expandAliases expands any @alias references in the argument list.
+// Returns the expanded list of IATA codes.
+func expandAliases(args []string) ([]string, error) {
+	var result []string
+	var store *config.AliasStore
+
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "@") {
+			// Lazy initialization of store
+			if store == nil {
+				var err error
+				store, err = config.NewAliasStore()
+				if err != nil {
+					return nil, fmt.Errorf("error loading aliases: %w", err)
+				}
+			}
+
+			aliasName := arg[1:] // Remove @ prefix
+			codes := store.Get(aliasName)
+			if codes == nil {
+				return nil, fmt.Errorf("unknown alias: %s", aliasName)
+			}
+			result = append(result, codes...)
+		} else {
+			result = append(result, arg)
+		}
+	}
+
+	return result, nil
 }
