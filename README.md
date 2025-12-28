@@ -1,12 +1,20 @@
 # t
 
+[![CI](https://github.com/cv/t/actions/workflows/ci.yml/badge.svg)](https://github.com/cv/t/actions/workflows/ci.yml)
+
 A quick and simple world clock for the command-line using IATA airport codes.
 
 ## Installation
 
+### From source
+
 ```bash
 go install github.com/cv/t/cmd/t@latest
 ```
+
+### From releases
+
+Download the latest binary from the [releases page](https://github.com/cv/t/releases).
 
 ## Usage
 
@@ -17,6 +25,13 @@ JFK: 🕖  19:06:21 (America/New_York)
 ```
 
 Any IATA airport code can be used, and will pick the timezone of that airport.
+
+### Version
+
+```bash
+$ t --version
+t v1.0.0 (commit: abc1234, built: 2024-01-01T00:00:00Z)
+```
 
 ### Shell Prompt Mode
 
@@ -43,33 +58,37 @@ go build -o t ./cmd/t
 
 ```bash
 # Run all tests
-go test ./...
+make test
 
 # Run with coverage
-go test -cover ./...
+make test-cover
 
 # Run with race detector
-go test -race ./...
-
-# Generate coverage report
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
+make test-race
 ```
 
 ### Linting
 
 ```bash
-# Install golangci-lint
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+make lint
+```
 
-# Run linters
-golangci-lint run
+### Releasing
+
+Releases are automated via GitHub Actions. To create a new release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ## Project Structure
 
 ```
 t/
+├── .github/workflows/  # CI and release automation
+│   ├── ci.yml
+│   └── release.yml
 ├── cmd/t/              # Main application entry point
 │   └── main.go
 ├── codes/              # IATA airport code to timezone mapping
@@ -77,6 +96,7 @@ t/
 ├── internal/clock/     # Core clock display logic
 │   ├── clock.go
 │   └── clock_test.go
+├── .goreleaser.yml     # Release configuration
 ├── go.mod
 ├── go.sum
 └── README.md

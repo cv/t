@@ -3,6 +3,7 @@
 // Usage:
 //
 //	t <IATA>...
+//	t -v | --version
 //
 // Examples:
 //
@@ -22,10 +23,23 @@ import (
 	"github.com/cv/t/internal/clock"
 )
 
+// Version information set by goreleaser ldflags
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, "usage: t <IATA>...\n")
 		os.Exit(1)
+	}
+
+	// Handle version flag
+	if os.Args[1] == "-v" || os.Args[1] == "--version" {
+		fmt.Printf("t %s (commit: %s, built: %s)\n", version, commit, date)
+		return
 	}
 
 	ps1Format := os.Getenv("PS1_FORMAT") != ""

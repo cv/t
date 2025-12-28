@@ -1,5 +1,8 @@
+// Package codes provides IATA airport code to timezone mappings.
 package codes
 
+// IATA maps airport codes to their corresponding IANA timezone identifiers.
+// For example, "SFO" maps to "America/Los_Angeles".
 var IATA = map[string]string{
 	"3BB": "America/Detroit",
 	"AAA": "Pacific/Tahiti",
