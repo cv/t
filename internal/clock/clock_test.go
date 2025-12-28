@@ -525,3 +525,318 @@ func TestDatesDiffer(t *testing.T) {
 	}
 	assert.False(t, datesDiffer(resultsWithUnfound), "unfound results should be skipped")
 }
+
+func TestParseTimeSpec(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantNil    bool
+		wantIATA   string
+		wantHour   int
+		wantMinute int
+	}{
+		{
+			name:       "full time with colon",
+			input:      "SFO@9:00",
+			wantNil:    false,
+			wantIATA:   "SFO",
+			wantHour:   9,
+			wantMinute: 0,
+		},
+		{
+			name:       "lowercase iata",
+			input:      "sfo@9:00",
+			wantNil:    false,
+			wantIATA:   "SFO",
+			wantHour:   9,
+			wantMinute: 0,
+		},
+		{
+			name:       "afternoon time",
+			input:      "JFK@14:30",
+			wantNil:    false,
+			wantIATA:   "JFK",
+			wantHour:   14,
+			wantMinute: 30,
+		},
+		{
+			name:       "hour only",
+			input:      "LHR@9",
+			wantNil:    false,
+			wantIATA:   "LHR",
+			wantHour:   9,
+			wantMinute: 0,
+		},
+		{
+			name:       "midnight",
+			input:      "NRT@0:00",
+			wantNil:    false,
+			wantIATA:   "NRT",
+			wantHour:   0,
+			wantMinute: 0,
+		},
+		{
+			name:       "late night",
+			input:      "LAX@23:59",
+			wantNil:    false,
+			wantIATA:   "LAX",
+			wantHour:   23,
+			wantMinute: 59,
+		},
+		{
+			name:    "plain IATA code",
+			input:   "SFO",
+			wantNil: true,
+		},
+		{
+			name:    "invalid hour",
+			input:   "SFO@25:00",
+			wantNil: true,
+		},
+		{
+			name:    "invalid minute",
+			input:   "SFO@9:60",
+			wantNil: true,
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantNil: true,
+		},
+		{
+			name:    "just @",
+			input:   "@9:00",
+			wantNil: true,
+		},
+		{
+			name:    "two-letter code",
+			input:   "SF@9:00",
+			wantNil: true,
+		},
+		{
+			name:    "four-letter code",
+			input:   "SFOX@9:00",
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseTimeSpec(tt.input)
+			if tt.wantNil {
+				assert.Nil(t, got, "expected nil for input %q", tt.input)
+				return
+			}
+			require.NotNil(t, got, "expected non-nil for input %q", tt.input)
+			assert.Equal(t, tt.wantIATA, got.IATA, "IATA mismatch")
+			assert.Equal(t, tt.wantHour, got.Hour, "Hour mismatch")
+			assert.Equal(t, tt.wantMinute, got.Minute, "Minute mismatch")
+		})
+	}
+}
+
+func TestTimeSpecResolveTime(t *testing.T) {
+	refTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		spec      TimeSpec
+		wantError bool
+		wantHour  int
+		wantMin   int
+	}{
+		{
+			name:      "SFO at 9am",
+			spec:      TimeSpec{IATA: "SFO", Hour: 9, Minute: 0},
+			wantError: false,
+			wantHour:  9,
+			wantMin:   0,
+		},
+		{
+			name:      "JFK at 2:30pm",
+			spec:      TimeSpec{IATA: "JFK", Hour: 14, Minute: 30},
+			wantError: false,
+			wantHour:  14,
+			wantMin:   30,
+		},
+		{
+			name:      "unknown airport",
+			spec:      TimeSpec{IATA: "XXX", Hour: 9, Minute: 0},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.spec.ResolveTime(refTime)
+			if tt.wantError {
+				assert.Error(t, err, "expected error")
+				return
+			}
+			require.NoError(t, err, "unexpected error")
+			assert.Equal(t, tt.wantHour, got.Hour(), "Hour mismatch")
+			assert.Equal(t, tt.wantMin, got.Minute(), "Minute mismatch")
+		})
+	}
+}
+
+func TestShowConversion(t *testing.T) {
+	refTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name      string
+		spec      TimeSpec
+		targets   []string
+		ps1Format bool
+		wantParts []string
+	}{
+		{
+			name:      "SFO 9am to JFK",
+			spec:      TimeSpec{IATA: "SFO", Hour: 9, Minute: 0},
+			targets:   []string{"JFK"},
+			ps1Format: false,
+			wantParts: []string{"SFO:", "09:00", "→", "JFK:", "12:00"},
+		},
+		{
+			name:      "SFO 9am to multiple",
+			spec:      TimeSpec{IATA: "SFO", Hour: 9, Minute: 0},
+			targets:   []string{"JFK", "LHR"},
+			ps1Format: false,
+			wantParts: []string{"SFO:", "09:00", "→", "JFK:", "12:00", "LHR:", "17:00"},
+		},
+		{
+			name:      "ps1 format",
+			spec:      TimeSpec{IATA: "SFO", Hour: 9, Minute: 0},
+			targets:   []string{"JFK"},
+			ps1Format: true,
+			wantParts: []string{"SFO 09:00", "JFK 12:00"},
+		},
+		{
+			name:      "with unknown target",
+			spec:      TimeSpec{IATA: "SFO", Hour: 9, Minute: 0},
+			targets:   []string{"XXX"},
+			ps1Format: false,
+			wantParts: []string{"SFO:", "09:00", "→", "XXX:", "??:??"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			ShowConversion(&buf, tt.spec, tt.targets, tt.ps1Format, &refTime)
+			got := buf.String()
+
+			for _, part := range tt.wantParts {
+				assert.Contains(t, got, part, "output should contain %q", part)
+			}
+		})
+	}
+}
+
+func TestShowConversionUnknownSource(t *testing.T) {
+	refTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	spec := TimeSpec{IATA: "XXX", Hour: 9, Minute: 0}
+	ShowConversion(&buf, spec, []string{"JFK"}, false, &refTime)
+	got := buf.String()
+
+	assert.Contains(t, got, "XXX:", "should mention unknown airport")
+	assert.Contains(t, got, "Unknown", "should indicate unknown")
+}
+
+func TestShowConversionAutoDate(t *testing.T) {
+	// Use a time where SFO and NRT would be on different days
+	// If it's 9am in SFO on June 15, it's after midnight on June 16 in Tokyo
+	refTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	spec := TimeSpec{IATA: "SFO", Hour: 20, Minute: 0} // 8pm in SFO = 12pm UTC next day = early morning in Tokyo
+	ShowConversion(&buf, spec, []string{"NRT"}, false, &refTime)
+	got := buf.String()
+
+	// At 8pm SFO time (UTC-7 in summer), it's 3am the next day in Tokyo (UTC+9)
+	// So dates should differ and be shown
+	assert.Contains(t, got, "Sat Jun 15", "should show SFO date")
+	assert.Contains(t, got, "Sun Jun 16", "should show NRT date")
+}
+
+func TestFormatConversion(t *testing.T) {
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+	locNY, _ := time.LoadLocation("America/New_York")
+
+	baseTime := time.Date(2024, 6, 15, 9, 0, 0, 0, loc)
+	nyTime := baseTime.In(locNY)
+
+	tests := []struct {
+		name      string
+		result    *ConversionResult
+		ps1Format bool
+		wantParts []string
+	}{
+		{
+			name: "basic conversion",
+			result: &ConversionResult{
+				Source: TimeResult{
+					IATA:     "SFO",
+					Time:     baseTime,
+					Location: "America/Los_Angeles",
+					Found:    true,
+				},
+				Targets: []TimeResult{
+					{
+						IATA:     "JFK",
+						Time:     nyTime,
+						Location: "America/New_York",
+						Found:    true,
+					},
+				},
+			},
+			ps1Format: false,
+			wantParts: []string{"SFO:", "09:00", "→", "JFK:", "12:00"},
+		},
+		{
+			name: "ps1 format",
+			result: &ConversionResult{
+				Source: TimeResult{
+					IATA:     "SFO",
+					Time:     baseTime,
+					Location: "America/Los_Angeles",
+					Found:    true,
+				},
+				Targets: []TimeResult{
+					{
+						IATA:     "JFK",
+						Time:     nyTime,
+						Location: "America/New_York",
+						Found:    true,
+					},
+				},
+			},
+			ps1Format: true,
+			wantParts: []string{"SFO 09:00", "JFK 12:00"},
+		},
+		{
+			name: "unfound source",
+			result: &ConversionResult{
+				Source: TimeResult{
+					IATA:  "XXX",
+					Found: false,
+				},
+				Targets: []TimeResult{},
+			},
+			ps1Format: false,
+			wantParts: []string{"XXX:", "Unknown"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatConversion(tt.result, tt.ps1Format)
+
+			for _, part := range tt.wantParts {
+				assert.Contains(t, got, part, "output should contain %q", part)
+			}
+		})
+	}
+}

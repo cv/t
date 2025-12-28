@@ -4,6 +4,7 @@ package clock
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,9 @@ const (
 	// LayoutDate is the date format for display.
 	LayoutDate = "Mon Jan 2"
 )
+
+// timeSpecRegex matches patterns like "SFO@9:00", "jfk@14:30", "lhr@9"
+var timeSpecRegex = regexp.MustCompile(`(?i)^([A-Z]{3})@(\d{1,2}):?(\d{2})?$`)
 
 var clocksLow = []string{
 	"🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚",
@@ -191,4 +195,171 @@ func datesDiffer(results []TimeResult) bool {
 		}
 	}
 	return false
+}
+
+// TimeSpec represents a parsed time specification like "SFO@9:00".
+type TimeSpec struct {
+	IATA   string
+	Hour   int
+	Minute int
+}
+
+// ParseTimeSpec parses a time specification string like "SFO@9:00" or "jfk@14:30".
+// Returns nil if the string is not a valid time spec (just a plain IATA code).
+func ParseTimeSpec(s string) *TimeSpec {
+	matches := timeSpecRegex.FindStringSubmatch(s)
+	if matches == nil {
+		return nil
+	}
+
+	iata := strings.ToUpper(matches[1])
+	hour := 0
+	minute := 0
+
+	// Parse hour
+	if _, err := fmt.Sscanf(matches[2], "%d", &hour); err != nil {
+		return nil
+	}
+	if hour < 0 || hour > 23 {
+		return nil
+	}
+
+	// Parse minute if present
+	if matches[3] != "" {
+		if _, err := fmt.Sscanf(matches[3], "%d", &minute); err != nil {
+			return nil
+		}
+		if minute < 0 || minute > 59 {
+			return nil
+		}
+	}
+
+	return &TimeSpec{
+		IATA:   iata,
+		Hour:   hour,
+		Minute: minute,
+	}
+}
+
+// ResolveTime creates a time.Time for this TimeSpec based on a reference time.
+// The resulting time will be at the specified hour:minute in the IATA location's timezone.
+func (ts *TimeSpec) ResolveTime(ref time.Time) (time.Time, error) {
+	locName, found := codes.IATA[ts.IATA]
+	if !found {
+		return time.Time{}, fmt.Errorf("unknown IATA code: %s", ts.IATA)
+	}
+
+	loc, err := time.LoadLocation(locName)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("loading location %s: %w", locName, err)
+	}
+
+	// Get reference time in the target location
+	refInLoc := ref.In(loc)
+
+	// Create a new time with the specified hour and minute
+	result := time.Date(
+		refInLoc.Year(), refInLoc.Month(), refInLoc.Day(),
+		ts.Hour, ts.Minute, 0, 0, loc,
+	)
+
+	return result, nil
+}
+
+// ConversionResult holds the result of a time conversion.
+type ConversionResult struct {
+	Source  TimeResult
+	Targets []TimeResult
+}
+
+// FormatConversion formats a conversion result for display.
+func FormatConversion(c *ConversionResult, ps1Format bool) string {
+	if !c.Source.Found {
+		return fmt.Sprintf("%s: Unknown airport code\n", c.Source.IATA)
+	}
+
+	if ps1Format {
+		var parts []string
+		parts = append(parts, fmt.Sprintf("%s %s", c.Source.IATA, c.Source.Time.Format(LayoutShort)))
+		for _, t := range c.Targets {
+			if t.Found {
+				parts = append(parts, fmt.Sprintf("%s %s", t.IATA, t.Time.Format(LayoutShort)))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s ??:??", t.IATA))
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+
+	// Check if dates differ to auto-show dates
+	allResults := append([]TimeResult{c.Source}, c.Targets...)
+	showDate := datesDiffer(allResults)
+
+	var sb strings.Builder
+
+	// Format source
+	emoji := ClockEmoji(c.Source.Time)
+	if showDate {
+		sb.WriteString(fmt.Sprintf("%s: %s %s %s", c.Source.IATA, emoji, c.Source.Time.Format(LayoutShort), c.Source.Time.Format(LayoutDate)))
+	} else {
+		sb.WriteString(fmt.Sprintf("%s: %s %s", c.Source.IATA, emoji, c.Source.Time.Format(LayoutShort)))
+	}
+
+	sb.WriteString("  →  ")
+
+	// Format targets
+	var targetParts []string
+	for _, t := range c.Targets {
+		if t.Found {
+			tEmoji := ClockEmoji(t.Time)
+			if showDate {
+				targetParts = append(targetParts, fmt.Sprintf("%s: %s %s %s", t.IATA, tEmoji, t.Time.Format(LayoutShort), t.Time.Format(LayoutDate)))
+			} else {
+				targetParts = append(targetParts, fmt.Sprintf("%s: %s %s", t.IATA, tEmoji, t.Time.Format(LayoutShort)))
+			}
+		} else {
+			targetParts = append(targetParts, fmt.Sprintf("%s: ??:??", t.IATA))
+		}
+	}
+	sb.WriteString(strings.Join(targetParts, ", "))
+	sb.WriteString("\n")
+
+	return sb.String()
+}
+
+// ShowConversion displays a time conversion from a source location to multiple targets.
+// sourceSpec is a time specification like "SFO@9:00".
+// targets are IATA codes to convert to.
+func ShowConversion(w io.Writer, sourceSpec TimeSpec, targets []string, ps1Format bool, now *time.Time) {
+	var refTime time.Time
+	if now != nil {
+		refTime = *now
+	} else {
+		refTime = time.Now()
+	}
+
+	sourceTime, err := sourceSpec.ResolveTime(refTime)
+	if err != nil {
+		_, _ = fmt.Fprintf(w, "%s: Unknown airport code\n", sourceSpec.IATA)
+		return
+	}
+
+	sourceResult := TimeResult{
+		IATA:     sourceSpec.IATA,
+		Time:     sourceTime,
+		Location: codes.IATA[sourceSpec.IATA],
+		Found:    true,
+	}
+
+	var targetResults []TimeResult
+	for _, target := range targets {
+		targetResults = append(targetResults, LookupTime(target, &sourceTime))
+	}
+
+	result := &ConversionResult{
+		Source:  sourceResult,
+		Targets: targetResults,
+	}
+
+	_, _ = fmt.Fprint(w, FormatConversion(result, ps1Format))
 }
