@@ -124,6 +124,7 @@ func TestFormatResult(t *testing.T) {
 		name      string
 		result    TimeResult
 		ps1Format bool
+		showDate  bool
 		wantParts []string // parts that should be in the output
 	}{
 		{
@@ -135,7 +136,20 @@ func TestFormatResult(t *testing.T) {
 				Found:    true,
 			},
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{"SFO:", "America/Los_Angeles", "\n"},
+		},
+		{
+			name: "full format with date",
+			result: TimeResult{
+				IATA:     "SFO",
+				Time:     localTime,
+				Location: "America/Los_Angeles",
+				Found:    true,
+			},
+			ps1Format: false,
+			showDate:  true,
+			wantParts: []string{"SFO:", "Sat Jun 15", "America/Los_Angeles", "\n"},
 		},
 		{
 			name: "ps1 format found",
@@ -146,6 +160,7 @@ func TestFormatResult(t *testing.T) {
 				Found:    true,
 			},
 			ps1Format: true,
+			showDate:  false,
 			wantParts: []string{"SFO "},
 		},
 		{
@@ -155,13 +170,14 @@ func TestFormatResult(t *testing.T) {
 				Found: false,
 			},
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{"XXX:", "??:??:??", "Unknown", "\n"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatResult(tt.result, tt.ps1Format)
+			got := FormatResult(tt.result, tt.ps1Format, tt.showDate)
 
 			for _, part := range tt.wantParts {
 				assert.Contains(t, got, part, "output should contain expected part")
@@ -184,7 +200,7 @@ func TestFormatResultContainsEmoji(t *testing.T) {
 		Found:    true,
 	}
 
-	got := FormatResult(result, false)
+	got := FormatResult(result, false, false)
 
 	// Should contain a clock emoji
 	hasEmoji := false
@@ -212,24 +228,35 @@ func TestShow(t *testing.T) {
 		name      string
 		iata      string
 		ps1Format bool
+		showDate  bool
 		wantParts []string
 	}{
 		{
 			name:      "full format",
 			iata:      "SFO",
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{"SFO:", "America/Los_Angeles"},
+		},
+		{
+			name:      "full format with date",
+			iata:      "SFO",
+			ps1Format: false,
+			showDate:  true,
+			wantParts: []string{"SFO:", "Sat Jun 15", "America/Los_Angeles"},
 		},
 		{
 			name:      "ps1 format",
 			iata:      "SFO",
 			ps1Format: true,
+			showDate:  false,
 			wantParts: []string{"SFO "},
 		},
 		{
 			name:      "unknown airport",
 			iata:      "XXX",
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{"XXX:", "Unknown"},
 		},
 	}
@@ -237,7 +264,7 @@ func TestShow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			Show(&buf, tt.iata, tt.ps1Format, &fixedTime)
+			Show(&buf, tt.iata, tt.ps1Format, tt.showDate, &fixedTime)
 			got := buf.String()
 
 			for _, part := range tt.wantParts {
@@ -254,38 +281,50 @@ func TestShowAll(t *testing.T) {
 		name      string
 		iatas     []string
 		ps1Format bool
+		showDate  bool
 		wantParts []string
 	}{
 		{
 			name:      "multiple airports full format",
 			iatas:     []string{"SFO", "JFK"},
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{"SFO:", "JFK:", "\n"},
 		},
 		{
 			name:      "multiple airports ps1 format",
 			iatas:     []string{"SFO", "JFK"},
 			ps1Format: true,
+			showDate:  false,
 			wantParts: []string{"SFO ", "JFK "},
 		},
 		{
 			name:      "single airport",
 			iatas:     []string{"SFO"},
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{"SFO:"},
 		},
 		{
 			name:      "empty list",
 			iatas:     []string{},
 			ps1Format: false,
+			showDate:  false,
 			wantParts: []string{},
+		},
+		{
+			name:      "with date flag",
+			iatas:     []string{"SFO", "JFK"},
+			ps1Format: false,
+			showDate:  true,
+			wantParts: []string{"SFO:", "JFK:", "Sat Jun 15", "\n"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			ShowAll(&buf, tt.iatas, tt.ps1Format, &fixedTime)
+			ShowAll(&buf, tt.iatas, tt.ps1Format, tt.showDate, &fixedTime)
 			got := buf.String()
 
 			for _, part := range tt.wantParts {
@@ -299,10 +338,64 @@ func TestShowAllPS1Spacing(t *testing.T) {
 	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 
 	var buf bytes.Buffer
-	ShowAll(&buf, []string{"SFO", "JFK", "LHR"}, true, &fixedTime)
+	ShowAll(&buf, []string{"SFO", "JFK", "LHR"}, true, false, &fixedTime)
 	got := buf.String()
 
 	// Should have spaces between entries: "SFO HH:MM JFK HH:MM LHR HH:MM"
 	parts := strings.Split(got, " ")
 	assert.GreaterOrEqual(t, len(parts), 6, "ps1 output should have space-separated entries")
+}
+
+func TestShowAllAutoDateWhenDatesDiffer(t *testing.T) {
+	// Time chosen so SFO (UTC-7) and NRT (UTC+9) are on different days
+	// At UTC 2024-06-15 23:00, SFO is 16:00 Jun 15, NRT is 08:00 Jun 16
+	fixedTime := time.Date(2024, 6, 15, 23, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	ShowAll(&buf, []string{"SFO", "NRT"}, false, false, &fixedTime)
+	got := buf.String()
+
+	// Should auto-show date because dates differ
+	assert.Contains(t, got, "Sat Jun 15", "should show SFO date")
+	assert.Contains(t, got, "Sun Jun 16", "should show NRT date")
+}
+
+func TestShowAllNoAutoDateWhenSameDate(t *testing.T) {
+	// Time chosen so SFO and JFK are on the same day
+	fixedTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	ShowAll(&buf, []string{"SFO", "JFK"}, false, false, &fixedTime)
+	got := buf.String()
+
+	// Should NOT auto-show date because dates are the same
+	assert.NotContains(t, got, "Jun 15", "should not show date when dates are same")
+}
+
+func TestDatesDiffer(t *testing.T) {
+	loc1, _ := time.LoadLocation("America/Los_Angeles")
+	loc2, _ := time.LoadLocation("Asia/Tokyo")
+
+	// Same day scenario
+	sameDay := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+	resultsSameDay := []TimeResult{
+		{IATA: "SFO", Time: sameDay.In(loc1), Found: true},
+		{IATA: "JFK", Time: sameDay, Found: true},
+	}
+	assert.False(t, datesDiffer(resultsSameDay), "same day should return false")
+
+	// Different day scenario
+	diffDay := time.Date(2024, 6, 15, 23, 0, 0, 0, time.UTC)
+	resultsDiffDay := []TimeResult{
+		{IATA: "SFO", Time: diffDay.In(loc1), Found: true},
+		{IATA: "NRT", Time: diffDay.In(loc2), Found: true},
+	}
+	assert.True(t, datesDiffer(resultsDiffDay), "different days should return true")
+
+	// With unfound result
+	resultsWithUnfound := []TimeResult{
+		{IATA: "SFO", Time: sameDay.In(loc1), Found: true},
+		{IATA: "XXX", Found: false},
+	}
+	assert.False(t, datesDiffer(resultsWithUnfound), "unfound results should be skipped")
 }

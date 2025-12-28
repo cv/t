@@ -15,6 +15,8 @@ const (
 	LayoutFull = "15:04:05"
 	// LayoutShort is the short time format without seconds.
 	LayoutShort = "15:04"
+	// LayoutDate is the date format for display.
+	LayoutDate = "Mon Jan 2"
 )
 
 var clocksLow = []string{
@@ -83,7 +85,8 @@ func LookupTime(iata string, now *time.Time) TimeResult {
 
 // FormatResult formats a TimeResult for display.
 // If ps1Format is true, outputs a compact format suitable for shell prompts.
-func FormatResult(r TimeResult, ps1Format bool) string {
+// If showDate is true, includes the date alongside the time.
+func FormatResult(r TimeResult, ps1Format, showDate bool) string {
 	if !r.Found {
 		return fmt.Sprintf("%s: ??:??:?? (Unknown)\n", r.IATA)
 	}
@@ -93,25 +96,60 @@ func FormatResult(r TimeResult, ps1Format bool) string {
 	}
 
 	emoji := ClockEmoji(r.Time)
-	return fmt.Sprintf("%s: %s  %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Location)
+	if showDate {
+		return fmt.Sprintf("%s: %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), r.Location)
+	}
+	return fmt.Sprintf("%s: %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Location)
 }
 
 // Show writes the time for a given IATA code to the provided writer.
 // If ps1Format is true, outputs a compact format suitable for shell prompts.
+// If showDate is true, includes the date alongside the time.
 // If now is nil, the current time is used.
-func Show(w io.Writer, iata string, ps1Format bool, now *time.Time) {
+func Show(w io.Writer, iata string, ps1Format, showDate bool, now *time.Time) {
 	result := LookupTime(iata, now)
-	_, _ = fmt.Fprint(w, FormatResult(result, ps1Format))
+	_, _ = fmt.Fprint(w, FormatResult(result, ps1Format, showDate))
 }
 
 // ShowAll writes the time for multiple IATA codes to the provided writer.
 // If ps1Format is true, outputs a compact format suitable for shell prompts.
+// If showDate is true, includes the date alongside the time.
+// If showDate is false but dates differ across results, date is shown automatically.
 // If now is nil, the current time is used.
-func ShowAll(w io.Writer, iatas []string, ps1Format bool, now *time.Time) {
+func ShowAll(w io.Writer, iatas []string, ps1Format, showDate bool, now *time.Time) {
+	// Collect all results first
+	results := make([]TimeResult, len(iatas))
 	for i, iata := range iatas {
-		Show(w, iata, ps1Format, now)
-		if ps1Format && i < len(iatas)-1 {
+		results[i] = LookupTime(iata, now)
+	}
+
+	// If showDate is not explicitly requested, check if dates differ
+	if !showDate && !ps1Format && len(results) > 1 {
+		showDate = datesDiffer(results)
+	}
+
+	// Output results
+	for i, result := range results {
+		_, _ = fmt.Fprint(w, FormatResult(result, ps1Format, showDate))
+		if ps1Format && i < len(results)-1 {
 			_, _ = fmt.Fprint(w, " ")
 		}
 	}
+}
+
+// datesDiffer returns true if any of the found results have different dates.
+func datesDiffer(results []TimeResult) bool {
+	var firstDate string
+	for _, r := range results {
+		if !r.Found {
+			continue
+		}
+		date := r.Time.Format("2006-01-02")
+		if firstDate == "" {
+			firstDate = date
+		} else if date != firstDate {
+			return true
+		}
+	}
+	return false
 }
