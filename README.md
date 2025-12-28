@@ -1,14 +1,14 @@
 # t
 
-Quick and dirty world clock for the command-line.
+A quick and simple world clock for the command-line using IATA airport codes.
 
-Install with:
+## Installation
 
 ```bash
-go install github.com/cv/t@master
+go install github.com/cv/t/cmd/t@latest
 ```
 
-And then:
+## Usage
 
 ```bash
 $ t sfo jfk
@@ -18,16 +18,73 @@ JFK: 🕖  19:06:21 (America/New_York)
 
 Any IATA airport code can be used, and will pick the timezone of that airport.
 
-If `PS1_FORMAT` is set, the output will be simply the airport code and the time, with no decorations or newline:
+### Shell Prompt Mode
+
+If `PS1_FORMAT` is set, the output will be compact with no decorations or newline, suitable for shell prompts:
 
 ```bash
 $ echo $(PS1_FORMAT=1 t sfo lon)
 SFO 17:47 LON 01:47
 ```
 
-That's it!
+## Development
+
+### Prerequisites
+
+- Go 1.21 or later
+
+### Building
+
+```bash
+go build -o t ./cmd/t
+```
+
+### Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with coverage
+go test -cover ./...
+
+# Run with race detector
+go test -race ./...
+
+# Generate coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+```
+
+### Linting
+
+```bash
+# Install golangci-lint
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+# Run linters
+golangci-lint run
+```
+
+## Project Structure
+
+```
+t/
+├── cmd/t/              # Main application entry point
+│   └── main.go
+├── codes/              # IATA airport code to timezone mapping
+│   └── iata.go
+├── internal/clock/     # Core clock display logic
+│   ├── clock.go
+│   └── clock_test.go
+├── go.mod
+├── go.sum
+└── README.md
+```
 
 ## License
+
+MIT License
 
 Copyright 2017 Carlos Villela <cv@lixo.org>
 
