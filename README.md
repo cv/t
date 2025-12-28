@@ -6,6 +6,12 @@ A quick and simple world clock for the command-line using IATA airport codes.
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install cv/tap/t
+```
+
 ### From source
 
 ```bash
