@@ -39,6 +39,13 @@ type TimeResult struct {
 	Time     time.Time
 	Location string
 	Found    bool
+	Weather  string // Optional weather info (e.g., "☀️ +13°C")
+}
+
+// DisplayOptions controls how time results are formatted.
+type DisplayOptions struct {
+	PS1Format bool // Compact format for shell prompts
+	ShowDate  bool // Show date alongside time
 }
 
 // RelativeOffset calculates the offset of t's timezone from the local timezone.
@@ -128,21 +135,28 @@ func LookupTime(iata string, now *time.Time) TimeResult {
 // FormatResult formats a TimeResult for display.
 // If ps1Format is true, outputs a compact format suitable for shell prompts.
 // If showDate is true, includes the date alongside the time.
-func FormatResult(r TimeResult, ps1Format, showDate bool) string {
+func FormatResult(r *TimeResult, ps1Format, showDate bool) string {
 	if !r.Found {
 		return fmt.Sprintf("%s: ??:??:?? (Unknown)\n", r.IATA)
 	}
 
 	if ps1Format {
+		if r.Weather != "" {
+			return fmt.Sprintf("%s %s %s", r.IATA, r.Time.Format(LayoutShort), r.Weather)
+		}
 		return fmt.Sprintf("%s %s", r.IATA, r.Time.Format(LayoutShort))
 	}
 
 	emoji := ClockEmoji(r.Time)
 	offset := RelativeOffset(r.Time)
-	if showDate {
-		return fmt.Sprintf("%s: %s %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), offset, r.Location)
+	weather := ""
+	if r.Weather != "" {
+		weather = " " + r.Weather
 	}
-	return fmt.Sprintf("%s: %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), offset, r.Location)
+	if showDate {
+		return fmt.Sprintf("%s: %s %s %s%s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), weather, offset, r.Location)
+	}
+	return fmt.Sprintf("%s: %s %s%s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), weather, offset, r.Location)
 }
 
 // Show writes the time for a given IATA code to the provided writer.
@@ -151,7 +165,7 @@ func FormatResult(r TimeResult, ps1Format, showDate bool) string {
 // If now is nil, the current time is used.
 func Show(w io.Writer, iata string, ps1Format, showDate bool, now *time.Time) {
 	result := LookupTime(iata, now)
-	_, _ = fmt.Fprint(w, FormatResult(result, ps1Format, showDate))
+	_, _ = fmt.Fprint(w, FormatResult(&result, ps1Format, showDate))
 }
 
 // ShowAll writes the time for multiple IATA codes to the provided writer.
@@ -172,8 +186,34 @@ func ShowAll(w io.Writer, iatas []string, ps1Format, showDate bool, now *time.Ti
 	}
 
 	// Output results
-	for i, result := range results {
-		_, _ = fmt.Fprint(w, FormatResult(result, ps1Format, showDate))
+	for i := range results {
+		_, _ = fmt.Fprint(w, FormatResult(&results[i], ps1Format, showDate))
+		if ps1Format && i < len(results)-1 {
+			_, _ = fmt.Fprint(w, " ")
+		}
+	}
+}
+
+// ShowAllWithWeather writes the time for multiple IATA codes with weather info.
+// weatherData is a map of IATA code to weather string (e.g., "☀️ +13°C").
+func ShowAllWithWeather(w io.Writer, iatas []string, ps1Format, showDate bool, now *time.Time, weatherData map[string]string) {
+	// Collect all results first
+	results := make([]TimeResult, len(iatas))
+	for i, iata := range iatas {
+		results[i] = LookupTime(iata, now)
+		if weather, ok := weatherData[strings.ToUpper(iata)]; ok {
+			results[i].Weather = weather
+		}
+	}
+
+	// If showDate is not explicitly requested, check if dates differ
+	if !showDate && !ps1Format && len(results) > 1 {
+		showDate = datesDiffer(results)
+	}
+
+	// Output results
+	for i := range results {
+		_, _ = fmt.Fprint(w, FormatResult(&results[i], ps1Format, showDate))
 		if ps1Format && i < len(results)-1 {
 			_, _ = fmt.Fprint(w, " ")
 		}

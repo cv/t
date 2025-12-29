@@ -6,6 +6,7 @@
 //	t <IATA>@<time> <IATA>...
 //	t @alias
 //	t -d | --date <IATA>...
+//	t -w | --weather <IATA>...
 //	t --overlap [--hours=H-H] <IATA> <IATA>...
 //	t --save <name> <IATA>...
 //	t --list
@@ -17,6 +18,10 @@
 //	$ t sfo jfk
 //	SFO: 🕓 16:06:21 (America/Los_Angeles)
 //	JFK: 🕖 19:06:21 (America/New_York)
+//
+//	$ t -w sfo jfk
+//	SFO: 🕓 16:06:21 ☀️ +13°C (+0h) (America/Los_Angeles)
+//	JFK: 🕖 19:06:21 ☁️ +1°C (+3h) (America/New_York)
 //
 //	$ t -d sfo nrt
 //	SFO: 🕓 15:12:20 Sun Dec 28 (America/Los_Angeles)
@@ -67,6 +72,7 @@
 // Flags:
 //
 //	-d, --date     Show date alongside time (auto-enabled when dates differ)
+//	-w, --weather  Show current weather conditions (via wttr.in)
 //	--overlap      Find overlapping work hours across timezones
 //	--hours=H-H    Custom work hours for overlap calculation (default: 9-17)
 //	--save <name>  Save following IATA codes as named alias
@@ -80,12 +86,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/cv/t/internal/clock"
 	"github.com/cv/t/internal/config"
+	"github.com/cv/t/internal/weather"
 )
 
 // Version information set by goreleaser ldflags
@@ -134,6 +142,7 @@ func run(args []string) int {
 
 	// Parse flags
 	showDate := false
+	showWeather := false
 	overlapMode := false
 	workHours := clock.DefaultWorkHours
 
@@ -141,6 +150,9 @@ func run(args []string) int {
 		switch {
 		case args[0] == "-d" || args[0] == "--date":
 			showDate = true
+			args = args[1:]
+		case args[0] == "-w" || args[0] == "--weather":
+			showWeather = true
 			args = args[1:]
 		case args[0] == "--overlap":
 			overlapMode = true
@@ -192,6 +204,30 @@ done:
 			return 1
 		}
 		clock.ShowConversion(os.Stdout, *spec, args[1:], ps1Format, nil)
+		return 0
+	}
+
+	// Fetch weather if requested
+	if showWeather {
+		ctx := context.Background()
+		var fetcher weather.Fetcher
+		if client, err := weather.NewCachedClient(); err == nil {
+			fetcher = client
+		} else {
+			// Fall back to uncached client
+			fetcher = weather.NewClient()
+		}
+		weatherData := weather.FetchAll(ctx, fetcher, args)
+
+		// Convert to string map
+		weatherStrings := make(map[string]string)
+		for iata, info := range weatherData {
+			if info.Found {
+				weatherStrings[iata] = info.Format()
+			}
+		}
+
+		clock.ShowAllWithWeather(os.Stdout, args, ps1Format, showDate, nil, weatherStrings)
 		return 0
 	}
 
