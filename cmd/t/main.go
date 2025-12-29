@@ -67,6 +67,8 @@
 // Flags:
 //
 //	-d, --date     Show date alongside time (auto-enabled when dates differ)
+//	--dst          Show DST warnings when a transition is within 5 days
+//	--dst=N        Show DST warnings when a transition is within N days
 //	--overlap      Find overlapping work hours across timezones
 //	--hours=H-H    Custom work hours for overlap calculation (default: 9-17)
 //	--save <name>  Save following IATA codes as named alias
@@ -101,7 +103,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--overlap [--hours=H-H]] <IATA>...\n")
+		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--dst[=N]] [--overlap [--hours=H-H]] <IATA>...\n")
 		fmt.Fprint(os.Stderr, "       t --save <name> <IATA>...\n")
 		fmt.Fprint(os.Stderr, "       t --list | --delete <name>\n")
 		return 1
@@ -134,6 +136,8 @@ func run(args []string) int {
 
 	// Parse flags
 	showDate := false
+	showDST := false
+	dstWindow := clock.DefaultDSTWindow
 	overlapMode := false
 	workHours := clock.DefaultWorkHours
 
@@ -141,6 +145,18 @@ func run(args []string) int {
 		switch {
 		case args[0] == "-d" || args[0] == "--date":
 			showDate = true
+			args = args[1:]
+		case args[0] == "--dst":
+			showDST = true
+			args = args[1:]
+		case len(args[0]) > 6 && args[0][:6] == "--dst=":
+			showDST = true
+			var n int
+			if _, err := fmt.Sscanf(args[0][6:], "%d", &n); err != nil || n < 1 {
+				fmt.Fprintf(os.Stderr, "invalid DST window: %s (use a positive number)\n", args[0][6:])
+				return 1
+			}
+			dstWindow = n
 			args = args[1:]
 		case args[0] == "--overlap":
 			overlapMode = true
@@ -161,7 +177,7 @@ func run(args []string) int {
 done:
 
 	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--overlap [--hours=H-H]] <IATA>...\n")
+		fmt.Fprint(os.Stderr, "usage: t [-d|--date] [--dst[=N]] [--overlap [--hours=H-H]] <IATA>...\n")
 		return 1
 	}
 
@@ -195,7 +211,7 @@ done:
 		return 0
 	}
 
-	clock.ShowAll(os.Stdout, args, ps1Format, showDate, nil)
+	clock.ShowAllWithDST(os.Stdout, args, ps1Format, showDate, showDST, dstWindow, nil)
 	return 0
 }
 

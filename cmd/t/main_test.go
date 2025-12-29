@@ -337,3 +337,35 @@ func TestRun_PS1Format(t *testing.T) {
 	assert.Contains(t, output, "SFO")
 	assert.Contains(t, output, "JFK")
 }
+
+func TestRun_DSTFlag(t *testing.T) {
+	var code int
+	output := captureStdout(t, func() {
+		code = run([]string{"--dst", "sfo"})
+	})
+
+	assert.Equal(t, 0, code)
+	assert.Contains(t, output, "SFO:")
+	// Note: May or may not contain DST warning depending on current date
+}
+
+func TestRun_DSTFlagWithWindow(t *testing.T) {
+	var code int
+	output := captureStdout(t, func() {
+		code = run([]string{"--dst=10", "sfo"})
+	})
+
+	assert.Equal(t, 0, code)
+	assert.Contains(t, output, "SFO:")
+}
+
+func TestRun_DSTFlagInvalidWindow(t *testing.T) {
+	code := run([]string{"--dst=invalid", "sfo"})
+	assert.Equal(t, 1, code)
+
+	code = run([]string{"--dst=0", "sfo"})
+	assert.Equal(t, 1, code)
+
+	code = run([]string{"--dst=-5", "sfo"})
+	assert.Equal(t, 1, code)
+}

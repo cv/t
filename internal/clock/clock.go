@@ -128,7 +128,17 @@ func LookupTime(iata string, now *time.Time) TimeResult {
 // FormatResult formats a TimeResult for display.
 // If ps1Format is true, outputs a compact format suitable for shell prompts.
 // If showDate is true, includes the date alongside the time.
+// If showDST is true, includes DST warnings when a transition is near.
 func FormatResult(r TimeResult, ps1Format, showDate bool) string {
+	return FormatResultWithDST(r, ps1Format, showDate, false, DefaultDSTWindow)
+}
+
+// FormatResultWithDST formats a TimeResult for display with optional DST warnings.
+// If ps1Format is true, outputs a compact format suitable for shell prompts.
+// If showDate is true, includes the date alongside the time.
+// If showDST is true, includes DST warnings when a transition is near.
+// dstWindow specifies how many days to look for DST transitions.
+func FormatResultWithDST(r TimeResult, ps1Format, showDate, showDST bool, dstWindow int) string {
 	if !r.Found {
 		return fmt.Sprintf("%s: ??:??:?? (Unknown)\n", r.IATA)
 	}
@@ -139,10 +149,19 @@ func FormatResult(r TimeResult, ps1Format, showDate bool) string {
 
 	emoji := ClockEmoji(r.Time)
 	offset := RelativeOffset(r.Time)
-	if showDate {
-		return fmt.Sprintf("%s: %s %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), offset, r.Location)
+
+	// Check for DST warning if requested
+	var dstWarning string
+	if showDST {
+		if transition := FindDSTTransition(r.Time, dstWindow); transition != nil {
+			dstWarning = " " + FormatDSTWarning(transition)
+		}
 	}
-	return fmt.Sprintf("%s: %s %s %s (%s)\n", r.IATA, emoji, r.Time.Format(LayoutFull), offset, r.Location)
+
+	if showDate {
+		return fmt.Sprintf("%s: %s %s %s %s (%s)%s\n", r.IATA, emoji, r.Time.Format(LayoutFull), r.Time.Format(LayoutDate), offset, r.Location, dstWarning)
+	}
+	return fmt.Sprintf("%s: %s %s %s (%s)%s\n", r.IATA, emoji, r.Time.Format(LayoutFull), offset, r.Location, dstWarning)
 }
 
 // Show writes the time for a given IATA code to the provided writer.
@@ -160,6 +179,17 @@ func Show(w io.Writer, iata string, ps1Format, showDate bool, now *time.Time) {
 // If showDate is false but dates differ across results, date is shown automatically.
 // If now is nil, the current time is used.
 func ShowAll(w io.Writer, iatas []string, ps1Format, showDate bool, now *time.Time) {
+	ShowAllWithDST(w, iatas, ps1Format, showDate, false, DefaultDSTWindow, now)
+}
+
+// ShowAllWithDST writes the time for multiple IATA codes to the provided writer.
+// If ps1Format is true, outputs a compact format suitable for shell prompts.
+// If showDate is true, includes the date alongside the time.
+// If showDate is false but dates differ across results, date is shown automatically.
+// If showDST is true, includes DST warnings when a transition is near.
+// dstWindow specifies how many days to look for DST transitions.
+// If now is nil, the current time is used.
+func ShowAllWithDST(w io.Writer, iatas []string, ps1Format, showDate, showDST bool, dstWindow int, now *time.Time) {
 	// Collect all results first
 	results := make([]TimeResult, len(iatas))
 	for i, iata := range iatas {
@@ -173,7 +203,7 @@ func ShowAll(w io.Writer, iatas []string, ps1Format, showDate bool, now *time.Ti
 
 	// Output results
 	for i, result := range results {
-		_, _ = fmt.Fprint(w, FormatResult(result, ps1Format, showDate))
+		_, _ = fmt.Fprint(w, FormatResultWithDST(result, ps1Format, showDate, showDST, dstWindow))
 		if ps1Format && i < len(results)-1 {
 			_, _ = fmt.Fprint(w, " ")
 		}
