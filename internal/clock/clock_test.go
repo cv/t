@@ -256,7 +256,7 @@ func TestFormatResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatResult(&tt.result, tt.ps1Format, tt.showDate)
+			got := FormatResult(tt.result, tt.ps1Format, tt.showDate)
 
 			for _, part := range tt.wantParts {
 				assert.Contains(t, got, part, "output should contain expected part")
@@ -279,7 +279,7 @@ func TestFormatResultContainsEmoji(t *testing.T) {
 		Found:    true,
 	}
 
-	got := FormatResult(&result, false, false)
+	got := FormatResult(result, false, false)
 
 	// Should contain a clock emoji
 	hasEmoji := false
@@ -323,7 +323,7 @@ func TestFormatResultContainsOffset(t *testing.T) {
 		Found:    true,
 	}
 
-	got := FormatResult(&result, false, false)
+	got := FormatResult(result, false, false)
 
 	// Tokyo is UTC+9, London is UTC+0 in winter, so offset should be +9h
 	assert.Contains(t, got, "(+9h)", "output should contain relative offset")
@@ -341,7 +341,7 @@ func TestFormatResultPS1NoOffset(t *testing.T) {
 		Found:    true,
 	}
 
-	got := FormatResult(&result, true, false)
+	got := FormatResult(result, true, false)
 
 	assert.NotContains(t, got, "(+", "ps1 format should not contain offset")
 	assert.NotContains(t, got, "(-", "ps1 format should not contain offset")
